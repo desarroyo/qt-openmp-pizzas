@@ -5,7 +5,9 @@
 
 #include "mainwindow.h"
 #include "hilo_ui.h"
-#include "hilo_abcd.h"
+#include "hilo_repartidor.h"
+#include "hilo_cocinero.h"
+#include "hilo_openmp.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <pthread.h>
@@ -13,9 +15,13 @@
 #include <QApplication>
 #include <QMetaObject>
 #include <qobjectdefs.h>
-#include <QFile>
 #include <QStringList>
 #include <QDebug>
+#include <omp.h>
+#include <QDebug>
+#include "portablesleep.h"
+#include <QTime>
+#include <QLineEdit>
 
 #ifdef _WIN32
 #  include <windows.h>
@@ -23,374 +29,880 @@
 #  include <unistd.h>
 #endif
 
-int vel_a= 0;
-int vel_b= 0;
-int vel_c= 0;
-int vel_d= 0;
+
+HiloRepartidor *repartidor1;
+HiloRepartidor *repartidor2;
+
+HiloCocinero *cocinero1;
+HiloCocinero *cocinero2;
+HiloCocinero *cocinero3;
+
+HiloOpenMP *openMP1;
+
+int const _NUM_COCINEROS = 3;
+
+int const _IMG_REPARTIDOR_1_POS_INI = 250;
+
+int const _TIEMPO_MIN_PREPARACION = 1;
+int const _TIEMPO_MAX_PREPARACION = 4;
+
+int const _TIEMPO_MIN_REPARTIDOR = 5;
+int const _TIEMPO_MAX_REPARTIDOR = 9;
+
+int const _TIEMPO_GENERACION_PEDIDOS = 10;
+int const _MAX_PEDIDOS_A_LA_VEZ = 3;
+
+int contRepartidor1 = 0;
+int contRepartidor2 = 0;
+
+int contCocinero1 = 0;
+int contCocinero2 = 0;
+int contCocinero3 = 0;
+
+int p1 = -1;
+int p2 = -1;
+int p3 = -1;
+
+int r1 = -1;
+int r2 = -1;
+
+int contPedido = 0;
 
 
-int cont_a= 0;
-int cont_b= 0;
-int cont_c= 0;
-int cont_d= 0;
+QList<int> listPedidos;
+QList<int> alListas;
+omp_lock_t hacer_pizza1;
 
-int current_lectores= 0;
-//int cont_lectores= 0;
-//int cont_escritores= 0;
-
-int lastId= 0;
-
-HiloABCD *workerA;
-HiloABCD *workerB;
+bool prepararPizzas = false;
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent),
-      infiniteCountRunning(false),
-      countRunning(false)
+    : QMainWindow(parent)
 {
 
     setFixedSize(1218, 729);
 
+
     ui.setupUi(this);
-    ui.lblLeyendo->setStyleSheet("QLabel { color : blue; }");
-    ui.lblEscribiendo->setStyleSheet("QLabel { color : red; }");
+
+    ui.lblCount->setText(QString::number(0)+" seg.");
+    ui.txtPedidos->setValidator( new QIntValidator(1, 100, this) );
 
 
-    ui.lblHilo01_velocidad->setStyleSheet("QLabel { color : blue; }");
-    ui.lblHilo02_velocidad->setStyleSheet("QLabel { color : red; }");
+    startRepartidores();
+    startCocineros();
 
-    ui.pbHilo01->setStyleSheet("QProgressBar {border: 2px solid grey;border-radius: 5px;background-color: #fbf3ec;}QProgressBar::chunk {background-color: #99d4d9;width: 20px;}");
-    ui.pbHilo02->setStyleSheet("QProgressBar {border: 2px solid grey;border-radius: 5px;background-color: #fbf3ec;}QProgressBar::chunk {background-color: #daa482;width: 20px;}");
-
-    vel_a = 1;
-    ui.slLectores->setValue(vel_a);
-    ui.pbHilo01->setValue(cont_a);
-
-    vel_b = 0;
-    ui.slEscritores->setValue(vel_b);
-    ui.pbHilo02->setValue(cont_b);
-
-
-    /*
-    abrirCSV();
-    appendCSV(101, "prueba");
-
-    */
-
-    connectSignalsSlots();
+    inicializaLista();
+    startInfiniteCount();
+    //startOpenMP();
+    //openMP1->enEspera(false);
+    //on_btnRepartidor1_clicked();
 }
 
-int MainWindow::appendCSV(int id, QString marca){
-    QFile file("C:/_ARCHIVOS/QT/qt-pizzas/assets/datos.csv");
 
+void MainWindow::updateOpenMPTiempo(int pedido, int hilo){
+    //qDebug("OPENMP");
+    qDebug("Orden: %s del hilo %d", qUtf8Printable(QString::number(pedido)), hilo);
+    switch (hilo) {
+    case 1:
 
-    if (file.open(QIODevice::Append)) {
-        QString valor = ""+QString::number(id) + "," + marca + "\n";
-        file.write(valor.toStdString().c_str());
-        file.close();
-     }
-
-    abrirCSV();
+        on_btnCocinero1_clicked();
+        ui.lblNoPedido1->setText("#"+QString::number(pedido));
+        qDebug("c1.");
+    break;
+    case 2:
+        on_btnCocinero2_clicked();
+        ui.lblNoPedido2->setText("#"+QString::number(pedido));
+        qDebug("c2.");
+    break;
+    case 3:
+        on_btnCocinero3_clicked();
+        ui.lblNoPedido3->setText("#"+QString::number(pedido));
+        qDebug("c3.");
+    break;
+    }
 }
 
-int MainWindow::abrirCSV(){
-    QString path = QDir::currentPath();
+void MainWindow::updateCocineroTiempo(int cnt, int hilo){
 
-    printf("X\n");
+     int porc_pizza = 0;
 
-    QFile file("C:/_ARCHIVOS/QT/qt-pizzas/assets/datos.csv");
-       if (!file.open(QIODevice::ReadOnly)) {
-           qDebug() << file.errorString();
-           return 1;
-       }
-
-
-       ui.tblMarcas->setRowCount(0);
-       ui.tblMarcas->clear();
-       ui.tblMarcas->setHorizontalHeaderLabels( {"ID", "MARCA"} );
-
-       QStringList wordList;
-       int fila = 0;
-       QTableWidgetItem pCell;
-       while (!file.atEnd()) {
-           fila = ui.tblMarcas->rowCount();
-           ui.tblMarcas->insertRow( fila );
-           QByteArray line = file.readLine();
-           wordList.append(line.split(',').first());
-
-           QTableWidgetItem *pCell = ui.tblMarcas->item(fila, 0);
-           if(!pCell)
-           {
-               pCell = new QTableWidgetItem;
-               ui.tblMarcas->setItem(fila, 0, pCell);
-           }
-           pCell->setText(line.split(',').first());
-
-           pCell = ui.tblMarcas->item(fila, 1);
-           if(!pCell)
-           {
-               pCell = new QTableWidgetItem;
-               ui.tblMarcas->setItem(fila, 1, pCell);
-           }
-           pCell->setText(line.split(',').last());
-           lastId = QString(line.split(',').first()).toInt();
-       }
-       file.close();
-
-       //qDebug() << wordList;
-
-       ui.tblMarcas->scrollToBottom();
-}
-
-void MainWindow::updateCount(int cnt, int hilo)
-{
     switch (hilo) {
         case 1:
-            cont_a = cont_a+1;
-            ui.pbHilo01->setValue(cont_a);
+
+            ui.pbCocinero01->setValue(contCocinero1);
+
+            porc_pizza = (int) (contCocinero1 * 10 ) / ui.pbCocinero01->maximum();
+
+            //qDebug("Tiempo Pizza: %s", qUtf8Printable(QString::number(porc_pizza)));
+
+            ui.pizza01->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(porc_pizza*10)+".png"));
+
+            if(contCocinero1 == ui.pbCocinero01->maximum()){
+                cocinero1->enEspera(true);
+
+                QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(p1, 1);
+                pCellEstatus->setText("L");
+                ui.tblPedidos->selectRow(p1);
+
+                alListas.append(p1);
+                ui.lblNoListos->setText(QString::number(alListas.length()));
+
+                p1 = -1;
+
+                //omp_unset_lock(&hacer_pizza1);
+                //openMP1->velocidad(1);
+            }
+
+            contCocinero1 = contCocinero1+1;
+
             break;
-    case 2:
-        cont_b = cont_b+1;
-        ui.pbHilo02->setValue(cont_b);
-        break;
+        case 2:
+
+            ui.pbCocinero02->setValue(contCocinero2);
+
+            porc_pizza = (int) (contCocinero2 * 10 ) / ui.pbCocinero02->maximum();
+
+            //qDebug("Tiempo Pizza: %s", qUtf8Printable(QString::number(porc_pizza)));
+
+            ui.pizza02->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(porc_pizza*10)+".png"));
+
+            if(contCocinero2 == ui.pbCocinero02->maximum()){
+                cocinero2->enEspera(true);
+
+                QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(p2, 1);
+                pCellEstatus->setText("L");
+                ui.tblPedidos->selectRow(p2);
+
+                alListas.append(p2);
+                ui.lblNoListos->setText(QString::number(alListas.length()));
+
+                p2 = -1;
+
+                //openMP1->velocidad(2);
+            }
+
+            contCocinero2 = contCocinero2+1;
+
+            break;
+
+        case 3:
+
+            ui.pbCocinero03->setValue(contCocinero3);
+
+            porc_pizza = (int) (contCocinero3 * 10 ) / ui.pbCocinero03->maximum();
+
+            //qDebug("Tiempo Pizza: %s", qUtf8Printable(QString::number(porc_pizza)));
+
+            ui.pizza03->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(porc_pizza*10)+".png"));
+
+            if(contCocinero3 == ui.pbCocinero03->maximum()){
+                cocinero3->enEspera(true);
+
+                QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(p3, 1);
+                pCellEstatus->setText("L");
+                ui.tblPedidos->selectRow(p3);
+
+                alListas.append(p3);
+                ui.lblNoListos->setText(QString::number(alListas.length()));
+
+                p3 = -1;
+
+                //openMP1->velocidad(3);
+            }
+
+            contCocinero3 = contCocinero3+1;
+
+            break;
     }
 
-    if(cont_a >= 100){
-        workerA->enEspera(true);
-        workerA->velocidad( (rand() %60)+30);
-        vel_a = 0;
-        current_lectores = 0;
-        ui.slLectores->setValue(vel_a);
-        ui.lblLeyendo->setText(QString::number(0)+ " estan leyendo ...");
-        reiniciaLector();
-    }
-
-    if(cont_b >= 100){
-        workerB->enEspera(true);
-        lastId++;
-        appendCSV(lastId, "Marca-"+QString::number(lastId));
-        workerB->velocidad( (rand() %60)+10);
-        ui.lblEscribiendo->setText(QString::number(0)+ " esta escribiendo ...");
-        //vel_b = vel_b -1;
-        //ui.slEscritores->setValue(vel_b);
-        reiniciaEscritor();
-    }
-
 }
 
-void MainWindow::reinicia(){
-    cont_a= 0;
-    ui.pbHilo01->setValue(cont_a);
-
-    cont_b= 0;
-    ui.pbHilo02->setValue(cont_b);
-
-    ui.lblLeyendo->setText(QString::number(0)+ " estan leyendo ...");
-    ui.lblEscribiendo->setText(QString::number(0)+ " esta escribiendo ...");
-
-    abrirCSV();
-}
-
-void MainWindow::reiniciaLector(){
-    cont_a= 0;
-    ui.pbHilo01->setValue(cont_a);
-
-}
-
-void MainWindow::reiniciaEscritor(){
-    cont_b= 0;
-    ui.pbHilo02->setValue(cont_b);
-
-}
-
-void MainWindow::updateInfiniteCount(int cnt)
+void MainWindow::on_btnCocinero1_clicked()
 {
-    ui.lblCount->setText(QString::number(cnt)+" seg.");
-    //ui.pbHilo01->setValue(cont_a);
-    ui.imgRepartidor1->setGeometry(ui.imgRepartidor1->geometry().x()+80,ui.imgRepartidor1->geometry().y(),ui.imgRepartidor1->geometry().width(),ui.imgRepartidor1->geometry().height());
-    ui.imgRepartidor2->setGeometry(ui.imgRepartidor2->geometry().x()+200,ui.imgRepartidor2->geometry().y(),ui.imgRepartidor2->geometry().width(),ui.imgRepartidor2->geometry().height());
 
-    ui.pizza01->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(cnt*10)+".png"));
+    qDebug(" Cocinero 1");
+    //omp_unset_lock(&hacer_pizza1);
+    contCocinero1 = 0;
+    int tiempoPreparacion = qrand() % ((_TIEMPO_MAX_PREPARACION+ 1) - _TIEMPO_MIN_PREPARACION) + _TIEMPO_MIN_PREPARACION;
 
-    //ui.pizza01.show();
-    if((rand() %100) > 75){
-        vel_a = ui.slLectores->value() + (rand() %5);
-        ui.slLectores->setValue(vel_a);
+    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
+
+    ui.pbCocinero01->setMaximum(tiempoPreparacion);
+    ui.pbCocinero01->setValue(contCocinero1);
+
+    ui.pizza01->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(0)+".png"));
+
+
+    cocinero1->enEspera(false);
+
+
+}
+
+void MainWindow::on_btnCocinero2_clicked()
+{
+
+    qDebug(" Cocinero 2");
+    contCocinero2 = 0;
+    int tiempoPreparacion = qrand() % ((_TIEMPO_MAX_PREPARACION+ 1) - _TIEMPO_MIN_PREPARACION) + _TIEMPO_MIN_PREPARACION;
+
+    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
+
+    ui.pbCocinero02->setMaximum(tiempoPreparacion);
+    ui.pbCocinero02->setValue(contCocinero2);
+
+    ui.pizza02->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(0)+".png"));
+
+
+    cocinero2->enEspera(false);
+}
+
+void MainWindow::on_btnCocinero3_clicked()
+{
+
+    qDebug(" Cocinero 3");
+    contCocinero3 = 0;
+    int tiempoPreparacion = qrand() % ((_TIEMPO_MAX_PREPARACION+ 1) - _TIEMPO_MIN_PREPARACION) + _TIEMPO_MIN_PREPARACION;
+
+    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
+
+    ui.pbCocinero03->setMaximum(tiempoPreparacion);
+    ui.pbCocinero03->setValue(contCocinero3);
+
+    ui.pizza03->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(0)+".png"));
+
+
+    cocinero3->enEspera(false);
+
+}
+
+void MainWindow::updateRepartidorTiempo(int cnt, int hilo){
+    switch (hilo) {
+        case 1:
+            ui.imgRepartidor1->setGeometry(ui.imgRepartidor1->geometry().x()+(contRepartidor1*130),ui.imgRepartidor1->geometry().y(),ui.imgRepartidor1->geometry().width(),ui.imgRepartidor1->geometry().height());
+            ui.pbRepartidor01->setValue(contRepartidor1);
+
+            if(ui.pbRepartidor01->value() == ui.pbRepartidor01->maximum()-1){
+                ui.imgRepartidor1->setPixmap(ui.imgRepartidor1->pixmap()->transformed(QTransform().scale(-1, 1)));
+
+                ui.imgRepartidor1->setGeometry(800,ui.imgRepartidor1->geometry().y(),ui.imgRepartidor1->geometry().width(),ui.imgRepartidor1->geometry().height());
+            }else if(ui.pbRepartidor01->value() == ui.pbRepartidor01->maximum()){
+                ui.imgRepartidor1->setGeometry(_IMG_REPARTIDOR_1_POS_INI,ui.imgRepartidor1->geometry().y(),ui.imgRepartidor1->geometry().width(),ui.imgRepartidor1->geometry().height());
+
+                ui.imgRepartidor1->setPixmap(ui.imgRepartidor1->pixmap()->transformed(QTransform().scale(-1, 1)));
+
+                repartidor1->enEspera(true);
+
+                QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(r1, 1);
+                pCellEstatus->setText("-");
+                ui.tblPedidos->selectRow(r1);
+
+                //alListas.removeAt(r1);
+                ui.lblNoListos->setText(QString::number(countListos()));
+                ui.lblNoPedidosCompletos->setText(QString::number(countCompletos()));
+
+                r1 = -1;
+
+            }
+            contRepartidor1 = contRepartidor1+1;
+            break;
+        case 2:
+            ui.imgRepartidor2->setGeometry(ui.imgRepartidor2->geometry().x()+(contRepartidor2*130),ui.imgRepartidor2->geometry().y(),ui.imgRepartidor2->geometry().width(),ui.imgRepartidor2->geometry().height());
+            ui.pbRepartidor02->setValue(contRepartidor2);
+
+            if(ui.pbRepartidor02->value() == ui.pbRepartidor02->maximum()-1){
+                ui.imgRepartidor2->setPixmap(ui.imgRepartidor2->pixmap()->transformed(QTransform().scale(-1, 1)));
+
+                ui.imgRepartidor2->setGeometry(800,ui.imgRepartidor2->geometry().y(),ui.imgRepartidor2->geometry().width(),ui.imgRepartidor2->geometry().height());
+            }else if(ui.pbRepartidor02->value() == ui.pbRepartidor02->maximum()){
+                ui.imgRepartidor2->setGeometry(_IMG_REPARTIDOR_1_POS_INI,ui.imgRepartidor2->geometry().y(),ui.imgRepartidor2->geometry().width(),ui.imgRepartidor2->geometry().height());
+
+                ui.imgRepartidor2->setPixmap(ui.imgRepartidor2->pixmap()->transformed(QTransform().scale(-1, 1)));
+
+                repartidor2->enEspera(true);
+
+                QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(r2, 1);
+                pCellEstatus->setText("-");
+                ui.tblPedidos->selectRow(r2);
+
+                //alListas.removeAt(r2);
+                ui.lblNoListos->setText(QString::number(countListos()));
+                ui.lblNoPedidosCompletos->setText(QString::number(countCompletos()));
+
+                r2 = -1;
+            }
+            contRepartidor2 = contRepartidor2+1;
+            break;
     }
-    if((rand() %100) > 85){
-        vel_b = ui.slEscritores->value() + (rand() %3);
-        ui.slEscritores->setValue(vel_b);
+
+}
+
+void MainWindow::on_btnRepartidor1_clicked()
+{
+
+    qDebug(" Repartidor 1");
+    contRepartidor1 = 0;
+    int tiempoRepartidor = qrand() % ((_TIEMPO_MAX_REPARTIDOR + 1) - _TIEMPO_MIN_REPARTIDOR) + _TIEMPO_MIN_REPARTIDOR;
+
+    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoRepartidor)));
+
+    ui.pbRepartidor01->setMaximum(tiempoRepartidor);
+    ui.pbRepartidor01->setValue(contRepartidor1);
+
+    QPixmap pixmap_reflect = ui.imgRepartidor1->pixmap()->transformed(QTransform().scale(1, 1));
+    ui.imgRepartidor1->setPixmap(pixmap_reflect);
+
+    ui.imgRepartidor1->setGeometry(_IMG_REPARTIDOR_1_POS_INI,ui.imgRepartidor1->geometry().y(),ui.imgRepartidor1->geometry().width(),ui.imgRepartidor1->geometry().height());
+
+
+
+    repartidor1->enEspera(false);
+
+
+}
+
+void MainWindow::on_btnRepartidor2_clicked()
+{
+
+    qDebug(" Repartidor 2");
+    contRepartidor2 = 0;
+    int tiempoRepartidor = qrand() % ((_TIEMPO_MAX_REPARTIDOR + 1) - _TIEMPO_MIN_REPARTIDOR) + _TIEMPO_MIN_REPARTIDOR;
+
+    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoRepartidor)));
+
+    ui.pbRepartidor02->setMaximum(tiempoRepartidor);
+    ui.pbRepartidor02->setValue(contRepartidor2);
+
+    QPixmap pixmap_reflect = ui.imgRepartidor2->pixmap()->transformed(QTransform().scale(1, 1));
+    ui.imgRepartidor2->setPixmap(pixmap_reflect);
+
+    ui.imgRepartidor2->setGeometry(_IMG_REPARTIDOR_1_POS_INI,ui.imgRepartidor2->geometry().y(),ui.imgRepartidor2->geometry().width(),ui.imgRepartidor2->geometry().height());
+
+
+
+    repartidor2->enEspera(false);
+
+}
+
+void MainWindow::startOpenMP()
+{
+    QThread  *openMPHilo1;
+    openMPHilo1 = new QThread;
+    openMP1 = new HiloOpenMP(1, 1000, 0, 4, false);
+
+    openMP1->moveToThread(openMPHilo1);
+
+
+    connect(openMPHilo1, SIGNAL(started()), openMP1, SLOT(doWork()));
+    connect(openMP1, SIGNAL(finished()), openMPHilo1, SLOT(quit()));
+
+    connect(openMP1, SIGNAL(finished()), openMP1, SLOT(deleteLater()));
+
+    //connect(openMP1, SIGNAL(finished()), this, SLOT(countFinished()));
+    //connect(openMP2, SIGNAL(finished()), this, SLOT(countFinished()));
+    //connect(openMP3, SIGNAL(finished()), this, SLOT(countFinished()));
+
+
+    connect(openMPHilo1, SIGNAL(finished()), openMPHilo1, SLOT(deleteLater()));
+
+    connect(openMP1, SIGNAL(updateOpenMPTiempo(int, int)), this, SLOT(updateOpenMPTiempo(int, int)));
+
+    //connect(ui.btnStop, SIGNAL(clicked()), openMP1, SLOT(stopWork()));
+
+    openMPHilo1->start();
+
+
+}
+
+void MainWindow::startRepartidores()
+{
+    QThread  *repartidorHilo1;
+    QThread  *repartidorHilo2;
+
+    repartidorHilo1 = new QThread;
+    repartidorHilo2 = new QThread;
+
+    repartidor1 = new HiloRepartidor(1, 1000, 0, 9, true);
+    repartidor2 = new HiloRepartidor(2, 1000, 0, 9, true);
+
+
+    repartidor1->moveToThread(repartidorHilo1);
+    repartidor2->moveToThread(repartidorHilo2);
+
+
+    connect(repartidorHilo1, SIGNAL(started()), repartidor1, SLOT(doWork()));
+    connect(repartidorHilo2, SIGNAL(started()), repartidor2, SLOT(doWork()));
+    connect(repartidor1, SIGNAL(finished()), repartidorHilo1, SLOT(quit()));
+    connect(repartidor2, SIGNAL(finished()), repartidorHilo2, SLOT(quit()));
+
+    connect(repartidor1, SIGNAL(finished()), repartidor1, SLOT(deleteLater()));
+    connect(repartidor2, SIGNAL(finished()), repartidor2, SLOT(deleteLater()));
+
+    //connect(repartidor1, SIGNAL(finished()), this, SLOT(countFinished()));
+    //connect(repartidor2, SIGNAL(finished()), this, SLOT(countFinished()));
+
+    connect(repartidorHilo1, SIGNAL(finished()), repartidorHilo1, SLOT(deleteLater()));
+    connect(repartidorHilo2, SIGNAL(finished()), repartidorHilo2, SLOT(deleteLater()));
+
+    connect(repartidor1, SIGNAL(updateRepartidorTiempo(int, int)), this, SLOT(updateRepartidorTiempo(int, int)));
+    connect(repartidor2, SIGNAL(updateRepartidorTiempo(int, int)), this, SLOT(updateRepartidorTiempo(int, int)));
+
+    //connect(ui.btnStop, SIGNAL(clicked()), repartidor1, SLOT(stopWork()));
+    //connect(ui.btnStop, SIGNAL(clicked()), repartidor2, SLOT(stopWork()));
+
+    repartidorHilo1->start();
+    repartidorHilo2->start();
+
+
+}
+
+void MainWindow::startCocineros()
+{
+    QThread  *cocineroHilo1;
+    QThread  *cocineroHilo2;
+    QThread  *cocineroHilo3;
+
+    cocineroHilo1 = new QThread;
+    cocineroHilo2 = new QThread;
+    cocineroHilo3 = new QThread;
+
+    cocinero1 = new HiloCocinero(1, 1000, 0, 4, true);
+    cocinero2 = new HiloCocinero(2, 1000, 0, 4, true);
+    cocinero3 = new HiloCocinero(3, 1000, 0, 4, true);
+
+
+    cocinero1->moveToThread(cocineroHilo1);
+    cocinero2->moveToThread(cocineroHilo2);
+    cocinero3->moveToThread(cocineroHilo3);
+
+
+
+    connect(cocineroHilo1, SIGNAL(started()), cocinero1, SLOT(doWork()));
+    connect(cocineroHilo2, SIGNAL(started()), cocinero2, SLOT(doWork()));
+    connect(cocineroHilo3, SIGNAL(started()), cocinero3, SLOT(doWork()));
+
+    connect(cocinero1, SIGNAL(finished()), cocineroHilo1, SLOT(quit()));
+    connect(cocinero2, SIGNAL(finished()), cocineroHilo2, SLOT(quit()));
+    connect(cocinero3, SIGNAL(finished()), cocineroHilo3, SLOT(quit()));
+
+
+    connect(cocinero1, SIGNAL(finished()), cocinero1, SLOT(deleteLater()));
+    connect(cocinero2, SIGNAL(finished()), cocinero2, SLOT(deleteLater()));
+    connect(cocinero3, SIGNAL(finished()), cocinero3, SLOT(deleteLater()));
+
+
+    //connect(cocinero1, SIGNAL(finished()), this, SLOT(countFinished()));
+    //connect(cocinero2, SIGNAL(finished()), this, SLOT(countFinished()));
+    //connect(cocinero3, SIGNAL(finished()), this, SLOT(countFinished()));
+
+
+    connect(cocineroHilo1, SIGNAL(finished()), cocineroHilo1, SLOT(deleteLater()));
+    connect(cocineroHilo2, SIGNAL(finished()), cocineroHilo2, SLOT(deleteLater()));
+    connect(cocineroHilo3, SIGNAL(finished()), cocineroHilo3, SLOT(deleteLater()));
+
+
+    connect(cocinero1, SIGNAL(updateCocineroTiempo(int, int)), this, SLOT(updateCocineroTiempo(int, int)));
+    connect(cocinero2, SIGNAL(updateCocineroTiempo(int, int)), this, SLOT(updateCocineroTiempo(int, int)));
+    connect(cocinero3, SIGNAL(updateCocineroTiempo(int, int)), this, SLOT(updateCocineroTiempo(int, int)));
+
+
+    //connect(ui.btnStop, SIGNAL(clicked()), cocinero1, SLOT(stopWork()));
+    //connect(ui.btnStop, SIGNAL(clicked()), cocinero2, SLOT(stopWork()));
+    //connect(ui.btnStop, SIGNAL(clicked()), cocinero3, SLOT(stopWork()));
+
+
+    cocineroHilo1->start();
+    cocineroHilo2->start();
+    cocineroHilo3->start();
+
+
+
+}
+
+void MainWindow::inicializaLista()
+{
+    contPedido = 1;
+
+    ui.tblPedidos->setRowCount(0);
+    ui.tblPedidos->clear();
+    ui.tblPedidos->setHorizontalHeaderLabels( {"#", "Est"} );
+    ui.tblPedidos->setColumnWidth(0,15);
+    ui.tblPedidos->setColumnWidth(1,10);
+
+}
+
+void MainWindow::on_btnCrearPedido_clicked()
+{
+    int noPedidos = 0;
+    try {
+        noPedidos = ui.txtPedidos->text().toInt();
+    } catch (...) {
+
     }
 
+    generaPedidos(noPedidos);
+    prepararPizzas = true;
 
 
+}
 
-    if(workerB->isEsperando() && ui.slLectores->value() > 0 ){
-            workerA->enEspera(false);
-            workerB->enEspera(true);
-            current_lectores = current_lectores + ui.slLectores->value();
-            ui.lblLeyendo->setText(QString::number(current_lectores)+ " estan leyendo ...");
-            vel_a = 0;
-            ui.slLectores->setValue(vel_a);
-     }
-     else if(workerB->isEsperando() && workerA->isEsperando() && ui.slEscritores->value() > 0 && ui.slLectores->value() <= 0 ){
-        workerB->enEspera(false);
-        workerA->enEspera(true);
-        ui.lblEscribiendo->setText(QString::number(1)+ " esta escribiendo ...");
-        vel_b = vel_b -1;
-        ui.slEscritores->setValue(vel_b);
+void MainWindow::generaPedidos(int noPedidos)
+{
 
+    contPedido = ui.tblPedidos->rowCount()+1;
+    #pragma omp parallel for num_threads(_NUM_COCINEROS)
+    for ( int i = contPedido; i < contPedido+noPedidos; i++ )
+    {
+        #pragma omp critical
+        agregaPedido(i);
     }
+
+}
+
+void MainWindow::preparandoPedido(int pedido)
+{
+    int fila = pedido-1;
+
+    QTableWidgetItem *pCell = ui.tblPedidos->item(fila, 0);
+    pCell->setText("#"+QString::number(pedido)+ " / Prep...");
+
+    ui.lblNoPedidos->setText( QString::number(ui.tblPedidos->rowCount() ) );
+    ui.tblPedidos->scrollTo(ui.tblPedidos->model()->index(fila, 0));
+    ui.tblPedidos->selectRow(fila);
+}
+
+void MainWindow::agregaPedido()
+{
+
+    int fila = ui.tblPedidos->rowCount();
+    ui.tblPedidos->insertRow( fila );
+
+    QTableWidgetItem *pCell = ui.tblPedidos->item(fila, 0);
+    if(!pCell)
+    {
+        pCell = new QTableWidgetItem;
+        ui.tblPedidos->setItem(fila, 0, pCell);
+    }
+    pCell->setText("#"+QString::number(++contPedido));
+
+    ui.lblNoPedidos->setText( QString::number(fila+1 ) );
+
+}
+
+void MainWindow::agregaPedido(int noPedido)
+{
+
+    int fila = ui.tblPedidos->rowCount();
+    ui.tblPedidos->insertRow( fila );
+
+    QTableWidgetItem *pCellPedido = ui.tblPedidos->item(fila, 0);
+    QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(fila, 0);
+    if(!pCellPedido)
+    {
+        pCellPedido = new QTableWidgetItem;
+        ui.tblPedidos->setItem(fila, 0, pCellPedido);
+    }
+    if(!pCellEstatus)
+    {
+        pCellEstatus = new QTableWidgetItem;
+        ui.tblPedidos->setItem(fila, 1, pCellEstatus);
+    }
+    pCellPedido->setText("#"+QString::number(noPedido));
+    pCellEstatus->setText("E");
+
+    ui.lblNoPedidos->setText( QString::number(fila+1 ) );
+
 }
 
 
+int MainWindow::getSiguientePedido(){
+    QString pedido = "";
+    QString estatus = "";
+    for (int fila = 0;fila< ui.tblPedidos->rowCount();fila++) {
+        pedido = ui.tblPedidos->item(fila, 0)->text();
+        estatus = ui.tblPedidos->item(fila, 1)->text();
 
-void MainWindow::startCount()
-{
-    reinicia();
-
-    QThread  *workerThreadA;
-    QThread  *workerThreadB;
-
-
-
-    if (countRunning) {
-        QMessageBox::critical(this, "Error", "Los Hilos ya estan corriendo!");
-        return;
+        if(estatus == "E"){
+            QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(fila, 1);
+            pCellEstatus->setText("P");
+            return fila;
+        }
     }
 
-    workerThreadA = new QThread;
-    workerThreadB = new QThread;
+    return -1;
+}
 
-    workerA       = new HiloABCD(1, (rand() %100)+50, 0, 100, true);
-    workerB       = new HiloABCD(2, (rand() %100)+50, 0, 100, true);
+int MainWindow::countListos(){
+    int cont = 0;
+    for (int i = 0; i< alListas.length(); i++) {
+        QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(i, 1);
+        if(pCellEstatus->text() == "L"){
+            cont++;
+        }
+    }
+    return cont;
+}
+
+int MainWindow::countCompletos(){
+    int cont = 0;
+    for (int i = 0; i< alListas.length(); i++) {
+        QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(i, 1);
+        if(pCellEstatus->text() == "-"){
+            cont++;
+        }
+    }
+    return cont;
+}
+
+int MainWindow::getSiguientePedidoRepartidor(){
+    QString pedido = "";
+    QString estatus = "";
+    for (int fila = 0;fila< ui.tblPedidos->rowCount();fila++) {
+        pedido = ui.tblPedidos->item(fila, 0)->text();
+        estatus = ui.tblPedidos->item(fila, 1)->text();
+
+        if(estatus == "L"){
+            QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(fila, 1);
+            pCellEstatus->setText("R");
+            return fila;
+        }
+    }
+
+    return -1;
+}
+
+void MainWindow::updateInfiniteCount(int contador){
+    //ui.lblTiempoTranscurrido->setText(QString::number(cnt));
+    ui.lblCount->setText(QString::number(contador)+" seg.");
+
+    if(prepararPizzas){
+        if(cocinero1->isEsperando()){
+            p1 = getSiguientePedido();
+            if(p1 > -1){
+                QString pedido = ui.tblPedidos->item(p1, 0)->text();
+                on_btnCocinero1_clicked();
+                ui.lblNoPedido1->setText(pedido);
+                ui.tblPedidos->selectRow(p1);
+            }else{
+                ui.lblNoPedido1->setText("-");
+                ui.pizza01->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(0)+".png"));
+            }
+
+        }
+        if(cocinero2->isEsperando()){
+            p2 = getSiguientePedido();
+            if(p2 > -1){
+                QString pedido = ui.tblPedidos->item(p2, 0)->text();
+                on_btnCocinero2_clicked();
+                ui.lblNoPedido2->setText(pedido);
+                ui.tblPedidos->selectRow(p2);
+            }else{
+                ui.lblNoPedido2->setText("-");
+                ui.pizza02->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(0)+".png"));
+            }
+        }
+        if(cocinero3->isEsperando()){
+            p3 = getSiguientePedido();
+            if(p3 > -1){
+                QString pedido = ui.tblPedidos->item(p3, 0)->text();
+                on_btnCocinero3_clicked();
+                ui.lblNoPedido3->setText(pedido);
+                ui.tblPedidos->selectRow(p3);
+            }else{
+                ui.lblNoPedido3->setText("-");
+                ui.pizza03->setPixmap(QPixmap("assets/pizza/pizza_"+QString::number(0)+".png"));
+            }
+        }
+    }
 
 
-    workerA->moveToThread(workerThreadA);
-    workerB->moveToThread(workerThreadB);
+    if(alListas.length() > 0){
+        if(repartidor1->isEsperando()){
+            r1 = getSiguientePedidoRepartidor();
+            if(r1 > -1){
+                QString pedido = ui.tblPedidos->item(r1, 0)->text();
+                on_btnRepartidor1_clicked();
+                ui.lblPedidoRepartiendo1->setText(pedido);
+            }else{
+                ui.lblPedidoRepartiendo1->setText("-");
+            }
+        }
+        if(repartidor2->isEsperando()){
+            r2 = getSiguientePedidoRepartidor();
+            if(r2 > -1){
+                QString pedido = ui.tblPedidos->item(r2, 0)->text();
+                on_btnRepartidor2_clicked();
+                ui.lblPedidoRepartiendo2->setText(pedido);
+            }else{
+                ui.lblPedidoRepartiendo2->setText("-");
+            }
+        }
 
-    connect(workerThreadA, SIGNAL(started()), workerA, SLOT(doWork()));
-    connect(workerThreadB, SIGNAL(started()), workerB, SLOT(doWork()));
-    connect(workerA, SIGNAL(finished()), workerThreadA, SLOT(quit()));
-    connect(workerB, SIGNAL(finished()), workerThreadB, SLOT(quit()));
+    }
 
-    connect(workerA, SIGNAL(finished()), workerA, SLOT(deleteLater()));
-    connect(workerB, SIGNAL(finished()), workerB, SLOT(deleteLater()));
 
-    connect(workerA, SIGNAL(finished()), this, SLOT(countFinished()));
-    connect(workerB, SIGNAL(finished()), this, SLOT(countFinished()));
+    if (contador % _TIEMPO_GENERACION_PEDIDOS == 0){
+        //int noPedidos = qrand() % ((_MAX_PEDIDOS_A_LA_VEZ+ 1) - 1) + 1;
+        //generaPedidos(noPedidos);
+        //omp_unset_lock(&hacer_pizza1);
+    }
 
-    connect(workerThreadA, SIGNAL(finished()), workerThreadA, SLOT(deleteLater()));
-    connect(workerThreadB, SIGNAL(finished()), workerThreadB, SLOT(deleteLater()));
 
-    connect(workerA, SIGNAL(updateCount(int, int)), this, SLOT(updateCount(int, int)));
-    connect(workerB, SIGNAL(updateCount(int, int)), this, SLOT(updateCount(int, int)));
-
-    connect(ui.btnStop, SIGNAL(clicked()), workerA, SLOT(stopWork()));
-    connect(ui.btnStop, SIGNAL(clicked()), workerB, SLOT(stopWork()));
-
-    workerThreadA->start();
-    workerThreadB->start();
-
-    countRunning = true;
 }
 
 void MainWindow::startInfiniteCount()
 {
-    QThread             *workerThread;
+    QThread *uiThread;
     HiloUI *worker;
 
-    if (infiniteCountRunning) {
-        QMessageBox::critical(this, "Error", "El hilo de UI ya esta corriendo!");
-        return;
+    uiThread = new QThread;
+    worker   = new HiloUI;
+    worker->moveToThread(uiThread);
+    connect(uiThread, SIGNAL(started()), worker, SLOT(doWork()));
+    connect(worker, SIGNAL(finished()), uiThread, SLOT(quit()));
+    connect(worker, SIGNAL(finished()), worker, SLOT(deleteLater()));
+    connect(uiThread, SIGNAL(finished()), uiThread, SLOT(deleteLater()));
+    //connect(worker, SIGNAL(finished()), this, SLOT(infiniteCountFinished()));
+    connect(worker, SIGNAL(updateCount(int)), this, SLOT(updateInfiniteCount(int)));
+    //connect(ui.btnStop, SIGNAL(clicked()), worker, SLOT(stopWork()));
+    uiThread->start();
+
+}
+
+int esperar(int seg){
+    PortableSleep::msleep(seg * 1000);
+    return 200;
+}
+
+void MainWindow::preparaPizzas()
+{
+
+    omp_lock_t hacer_pizza2;
+    omp_lock_t hacer_pizza3;
+
+    omp_init_lock(&hacer_pizza1);
+    omp_init_lock(&hacer_pizza2);
+    omp_init_lock(&hacer_pizza3);
+
+    int pizzas_pendientes = ui.txtPedidos->text().toInt();
+    int contador = 1;
+
+    int hilo = 0;
+    QString orden = "";
+
+    #pragma omp parallel for num_threads(_NUM_COCINEROS)
+    for ( int i = 0; i < pizzas_pendientes; i++ )
+    {
+
+       hilo = omp_get_thread_num()+1;
+       qDebug("Soy la hebra %d de un total de %d\n",hilo,_NUM_COCINEROS);
+
+
+
+       orden = ui.tblPedidos->item(i, 0)->text();
+       qDebug("Orden: %s", qUtf8Printable(orden));
+
+       //esperar();
+       switch (hilo) {
+       case 1:
+
+           on_btnCocinero1_clicked();
+           ui.lblNoPedido1->setText(orden);
+           qDebug("c1.");
+
+           omp_set_lock(&hacer_pizza1);
+           //while(!cocinero1->isEsperando()){}
+
+           //omp_unset_lock(&hacer_pizza1);
+       break;
+       case 2:
+           omp_set_lock(&hacer_pizza2);
+           on_btnCocinero2_clicked();
+           ui.lblNoPedido2->setText(orden);
+           //while(!cocinero2->isEsperando()){//qDebug("c2.");}
+           qDebug("c2.");
+           omp_unset_lock(&hacer_pizza2);
+       break;
+       case 3:
+           omp_set_lock(&hacer_pizza3);
+           on_btnCocinero3_clicked();
+           ui.lblNoPedido3->setText(orden);
+           //while(!cocinero3->isEsperando()){//qDebug("c3.");}
+           qDebug("c3.");
+           omp_unset_lock(&hacer_pizza3);
+       break;
+       }
+       //esperar(4);
+
+
+       //omp_unset_lock(&hacer_pizza);
+        // some stuff
+
+       //contador = contador+ 1;
+       qDebug("%s", qUtf8Printable(QString::number(i)));
+       ui.lblCount->setText(QString::number(contador)+" seg.");
     }
 
-    workerThread = new QThread;
-    worker       = new HiloUI;
-    worker->moveToThread(workerThread);
-    connect(workerThread, SIGNAL(started()), worker, SLOT(doWork()));
-    connect(worker, SIGNAL(finished()), workerThread, SLOT(quit()));
-    connect(worker, SIGNAL(finished()), worker, SLOT(deleteLater()));
-    connect(workerThread, SIGNAL(finished()), workerThread, SLOT(deleteLater()));
-    connect(worker, SIGNAL(finished()), this, SLOT(infiniteCountFinished()));
-    connect(worker, SIGNAL(updateCount(int)), this, SLOT(updateInfiniteCount(int)));
-    connect(ui.btnStop, SIGNAL(clicked()), worker, SLOT(stopWork()));
-    workerThread->start();
+    omp_destroy_lock(&hacer_pizza1);
+    omp_destroy_lock(&hacer_pizza2);
+    omp_destroy_lock(&hacer_pizza3);
+}
 
-    infiniteCountRunning = true;
+void MainWindow::on_btnStart_clicked()
+{
+    //startInfiniteCount();
 
     /*
-    pthread_t referencia;
+    on_btnRepartidor1_clicked();
+    on_btnRepartidor2_clicked();
+    on_btnCocinero1_clicked();
+    on_btnCocinero2_clicked();
+    on_btnCocinero3_clicked();
+    */
 
-    printf("Iniciando el proceso\n");
+    //inicializaLista();
 
-    struct arg_struct args;
-       args.hilo = 1;
-       args.vel = 100;
-       args.mw = this;
-       args.pb = this->ui.pbHilo01;
+    //QTime time = QTime::currentTime();
+    //int orden = (QString::number(time.hour())+QString::number(time.minute())+QString::number(time.second())).toInt();
 
-    pthread_create(&referencia, NULL, ejecutaSegundoPlano, (void *) &args);
-    pthread_join(referencia,NULL);
 
+
+/*
+    omp_lock_t hacer_pizza;
+
+    omp_init_lock(&hacer_pizza);
+    int pizzas_pendientes = 10;
+
+    #pragma omp parallel for
+    for ( int i = 0; i < pizzas_pendientes; i++ )
+    {
+        // some stuff
+       omp_set_lock(&hacer_pizza);
+        // one thread at a time stuff
+       //esperar();
+
+       omp_unset_lock(&hacer_pizza);
+        // some stuff
+       contador = contador+ 1;
+       qDebug("%s", qUtf8Printable(QString::number(contador)));
+       ui.lblCount->setText(QString::number(contador)+" seg.");
+    }
+
+    omp_destroy_lock(&hacer_pizza);
+*/
+
+    /*
+    agregaPedido();
+    agregaPedido();
+    agregaPedido();
+    agregaPedido();
+    agregaPedido();
+    agregaPedido();
+    agregaPedido();
+
+    preparandoPedido(7);
     */
 }
 
-void MainWindow::countFinished()
-{
-    countRunning = false;
-
-   reinicia();
-}
-
-void MainWindow::infiniteCountFinished()
-{
-    infiniteCountRunning = false;
-    cont_a= 0;
-    ui.pbHilo01->setValue(cont_a);
-}
-
-void MainWindow::connectSignalsSlots()
-{
-    connect(ui.btnStart, SIGNAL(clicked()), this, SLOT(startInfiniteCount()));
-    connect(ui.btnStart, SIGNAL(clicked()), this, SLOT(startCount()));
-}
-
-void MainWindow::on_btnRandom_clicked()
-{
-
-    vel_a = rand() %12;
-    ui.slLectores->setValue(vel_a);
-
-    vel_b = rand() %10;
-    ui.slEscritores->setValue(vel_b);
 
 
-    actualizaVelocidadHilo();
-
-}
-
-void MainWindow::actualizaVelocidadHilo(){
-    if(workerA){
-        workerA->velocidad((rand() %80)+30);
-    }
-    if(workerB){
-        workerB->velocidad((rand() %60)+10);
-    }
-}
-
-
-void MainWindow::on_slLectores_valueChanged(int value)
-{
-    vel_a = value;
-    ui.lblHilo01_velocidad->setText(QString::number(value));
-    //actualizaVelocidadHilo();
-}
-
-void MainWindow::on_slEscritores_valueChanged(int value)
-{
-    vel_b = value;
-    ui.lblHilo02_velocidad->setText(QString::number(value));
-    //actualizaVelocidadHilo();
-}
 

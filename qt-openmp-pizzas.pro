@@ -33,14 +33,18 @@ CONFIG += c++11
 SOURCES += \
         main.cpp \
         mainwindow.cpp \
-    hilo_abcd.cpp \
-    hilo_ui.cpp
+    hilo_ui.cpp \
+    hilo_repartidor.cpp \
+    hilo_cocinero.cpp \
+    hilo_openmp.cpp
 
 HEADERS += \
         mainwindow.h \
     portablesleep.h \
-    hilo_abcd.h \
-    hilo_ui.h
+    hilo_ui.h \
+    hilo_repartidor.h \
+    hilo_cocinero.h \
+    hilo_openmp.h
 
 FORMS += \
         mainwindow.ui

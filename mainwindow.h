@@ -10,40 +10,48 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
     public:
-        MainWindow(QWidget *parent=0);
-        Q_SLOT void setEditText(const QString & str) {
-            updateInfiniteCount(10);
-          }
+        MainWindow(QWidget *parent=0);        
 
 private slots:
-        void updateCount(int cnt, int hilo);
-        void updateInfiniteCount(int cnt);
 
-        void startCount();
+        void updateInfiniteCount(int cnt);
+        void updateRepartidorTiempo(int cnt, int hilo);
+        void updateCocineroTiempo(int cnt, int hilo);
+        void updateOpenMPTiempo(int cnt, int hilo);
+
+
+        void startRepartidores();
+        void startCocineros();
+        void startOpenMP();
+
         void startInfiniteCount();
 
-        void countFinished();
-        void infiniteCountFinished();
 
-        void on_btnRandom_clicked();
+        void on_btnRepartidor1_clicked();
+        void on_btnRepartidor2_clicked();
 
-        void on_slLectores_valueChanged(int value);
+        void on_btnCocinero1_clicked();
+        void on_btnCocinero2_clicked();
+        void on_btnCocinero3_clicked();
+        void on_btnCrearPedido_clicked();
 
-        void on_slEscritores_valueChanged(int value);
 
-        void reinicia();
-        void reiniciaLector();
-        void reiniciaEscritor();
-        void actualizaVelocidadHilo();
-        int abrirCSV();
-        int appendCSV(int, QString);
+        void on_btnStart_clicked();
+
+        int getSiguientePedido();
+        int getSiguientePedidoRepartidor();
+        int countListos();
+        int countCompletos();
+
+        void inicializaLista();
+        void agregaPedido();
+        void agregaPedido(int);
+        void preparandoPedido(int);
+        void generaPedidos(int);
+        void preparaPizzas();
 
 
     private:
-        void connectSignalsSlots();
-
-        bool countRunning;
-        bool infiniteCountRunning;
 
         Ui_MainWindow ui;
 
