@@ -3,27 +3,32 @@
 #include "hilo_openmp.h"
 #include "portablesleep.h"
 #include <omp.h>
+#include <QList>
+#include <unistd.h>
 
 
-HiloOpenMP::HiloOpenMP(int hilo, int velocidad, int start, int end, bool esperando)
+int const _TIEMPO_MAX_PREPARACION = 4;
+int const _NUM_COCINEROS = 3;
+int last = 0;
+
+HiloOpenMP::HiloOpenMP(int hilo, int pedidos, bool esperando)
     : m_running(true)
 {
     m_hilo      = hilo;
-    m_hiloStart = start;
-    m_hiloEnd   = end;
-    m_hiloSpeed = velocidad;
+    m_pedidos = pedidos;
     m_esperando = esperando;
 
-    omp_lock_t hacer_pizza1;
 }
 
-void HiloOpenMP::velocidad(int velocidad)
+void HiloOpenMP::pedidos(int pedidos)
 {
-    m_hiloSpeed = velocidad;
+    last =  m_pedidos;
+    m_pedidos = m_pedidos + pedidos;
 }
 
 void HiloOpenMP::enEspera(bool esperando)
 {
+    PortableSleep::msleep(1000);
     m_esperando = esperando;
 }
 
@@ -36,90 +41,48 @@ void HiloOpenMP::doWork()
 {
     int i = 0;
 
-
-    omp_init_lock(&hacer_pizza1);
+    omp_lock_t lock;
+    omp_init_lock(&lock);
 
     while (m_running) {
         if(!m_esperando){
 
 
+            int semaphore_count  = 0;
 
-            int pizzas_pendientes = 100;
-            int contador = 1;
-
-            int hilo = 0;
-            QString orden = "";
-
-            /*
-            omp_set_lock(&hacer_pizza1);
-            omp_set_lock(&hacer_pizza2);
-            omp_set_lock(&hacer_pizza3);
-            */
-
-            #pragma omp parallel for num_threads(3)
-            for ( int i = 1; i <= pizzas_pendientes; i++ )
+#pragma omp parallel for
+            for(int thread=0; thread<_NUM_COCINEROS; thread++)
             {
 
-                #pragma omp critical
+                for(int p=thread+last; p < m_pedidos; p+=_NUM_COCINEROS)
                 {
-                    // one thread at a time stuff
+                    omp_set_lock(&lock);
 
+                    //qDebug("Soy el hilo %d en el pedido %d\n",thread,p);
+                    emit updateOpenMPTiempo(p+1, thread+1);
+                    semaphore_count++;
 
-                    hilo = omp_get_thread_num()+1;
-                    //qDebug("Soy la hebra %d de un total de %d\n",hilo,3);
-
-                    orden = "#"+QString::number(i);
-                    emit updateOpenMPTiempo(i, hilo);
-
-                    if(hilo == 1){
-                        //PortableSleep::msleep(4000);
-                     omp_set_lock(&hacer_pizza1);
-                    }else if(hilo == 2){
-                         //PortableSleep::msleep(4000);
-                     omp_set_lock(&hacer_pizza2);
-                    }else if(hilo == 3){
-                         //PortableSleep::msleep(4000);
-                     omp_set_lock(&hacer_pizza3);
+                    if(semaphore_count >= _NUM_COCINEROS){
+                        PortableSleep::msleep(1000 * (_TIEMPO_MAX_PREPARACION+1));
+                        semaphore_count= 0;
                     }
 
-                   //orden = ui.tblPedidos->item(i, 0)->text();
-
-                   //qDebug("Orden: %s del hilo %d", qUtf8Printable(orden), hilo);
-                   //qDebug("%s", qUtf8Printable(QString::number(i)));
-
-
-
-
-
-
-
+                    omp_unset_lock(&lock);
                 }
+            } // Implicit barrier at the end of the parallel for
+#pragma omp barrier
+            // Why a barrier when there is only one thread?
 
 
-                //i++;
-                qApp->processEvents();
-
-
-                /*
-                #pragma omp critical
-                {
-               omp_unset_lock(&hacer_pizza1);
-               omp_unset_lock(&hacer_pizza2);
-               omp_unset_lock(&hacer_pizza3);
-                }
-                */
-
-               //contador = contador+ 1;
-               //ui.lblCount->setText(QString::number(contador)+" seg.");
-            }
-
-            omp_destroy_lock(&hacer_pizza1);
-            omp_destroy_lock(&hacer_pizza2);
-            omp_destroy_lock(&hacer_pizza3);
 
             enEspera(true);
+
+        }else{
+            PortableSleep::msleep(500);
         }
     }
+
+    omp_destroy_lock(&lock);
     emit finished();
 }
 

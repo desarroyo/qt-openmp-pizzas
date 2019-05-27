@@ -9,12 +9,12 @@ class HiloOpenMP : public QObject
     Q_OBJECT
 
     public:
-        HiloOpenMP(int hilo, int speed, int start, int end, bool esperando);
+        HiloOpenMP(int hilo, int pedidos, bool esperando);
 
     public slots:
         void doWork();
         void stopWork();
-        void velocidad(int);
+        void pedidos(int);
         void enEspera(bool);
         bool isEsperando();
 
@@ -24,14 +24,9 @@ class HiloOpenMP : public QObject
 
     private:
         int m_hilo;
-        unsigned int m_hiloSpeed;
-        int m_hiloStart;
-        int m_hiloEnd;
+        unsigned int m_pedidos = 0;
         bool m_running;
         bool m_esperando;
-        omp_lock_t hacer_pizza1;
-        omp_lock_t hacer_pizza2;
-        omp_lock_t hacer_pizza3;
 };
 
 #endif // __INFINITE_COUNT_WORKER_H__

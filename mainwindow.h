@@ -35,20 +35,18 @@ private slots:
         void on_btnCocinero3_clicked();
         void on_btnCrearPedido_clicked();
 
-
-        void on_btnStart_clicked();
-
         int getSiguientePedido();
+        int getSiguientePedido(int);
         int getSiguientePedidoRepartidor();
         int countListos();
         int countCompletos();
+        int countPorPreparar();
 
         void inicializaLista();
         void agregaPedido();
         void agregaPedido(int);
         void preparandoPedido(int);
         void generaPedidos(int);
-        void preparaPizzas();
 
 
     private:

@@ -38,6 +38,8 @@ void HiloRepartidor::doWork()
             i++;
             qApp->processEvents();
             PortableSleep::msleep(m_hiloSpeed);
+        }else{
+            PortableSleep::msleep(500);
         }
     }
     emit finished();
