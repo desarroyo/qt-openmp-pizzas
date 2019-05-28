@@ -43,10 +43,16 @@ Mostrar en pantalla, la lista de pizzas terminadas, en preparación y en espera 
 
 Desde <https://classroom.google.com/c/Mjc0NjI2NTQ0OTRa/a/MzU3NDE2OTI1ODNa/details> 
 
+### Equipo
+Bruno Alberto Becerra Gómez
+David Arroyo Sánchez
+Manuel Alejandro Salinas
+Miriam del Carmen García Martínez
+
 ### Todos
 
- - Documentar
- - Pruebas
+ - 
+ - 
 
 License
 ----
