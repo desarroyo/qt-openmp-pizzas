@@ -107,6 +107,10 @@ MainWindow::MainWindow(QWidget *parent)
 void MainWindow::updateOpenMPTiempo(int pedido, int hilo){
     //qDebug("OPENMP");
 
+    preparaPizza(pedido, hilo);
+}
+
+void MainWindow::preparaPizza(int pedido, int hilo){
     qDebug("Cocinero %d / pedido #%d\n",hilo,pedido);
 
     switch (hilo) {
@@ -130,6 +134,7 @@ void MainWindow::updateOpenMPTiempo(int pedido, int hilo){
     case 2:
         if(cocinero2->isEsperando()){
             p2 = getSiguientePedido(pedido);
+            qDebug("Fila %d / pedido #%d\n",p2,pedido);
             if(p2 > -1){
                 QString txtPedido = ui.tblPedidos->item(p2, 0)->text();
                 on_btnCocinero2_clicked();
@@ -144,6 +149,7 @@ void MainWindow::updateOpenMPTiempo(int pedido, int hilo){
     case 3:
         if(cocinero3->isEsperando()){
             p3 = getSiguientePedido(pedido);
+            qDebug("Fila %d / pedido #%d\n",p3,pedido);
             if(p3 > -1){
                 QString txtPedido = ui.tblPedidos->item(p3, 0)->text();
                 on_btnCocinero3_clicked();
@@ -251,12 +257,10 @@ void MainWindow::updateCocineroTiempo(int cnt, int hilo){
 void MainWindow::on_btnCocinero1_clicked()
 {
 
-    qDebug(" Cocinero 1");
-    //omp_unset_lock(&hacer_pizza1);
     contCocinero1 = 0;
     int tiempoPreparacion = qrand() % ((_TIEMPO_MAX_PREPARACION+ 1) - _TIEMPO_MIN_PREPARACION) + _TIEMPO_MIN_PREPARACION;
 
-    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
+    //qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
 
     ui.pbCocinero01->setMaximum(tiempoPreparacion);
     ui.pbCocinero01->setValue(contCocinero1);
@@ -276,7 +280,7 @@ void MainWindow::on_btnCocinero2_clicked()
     contCocinero2 = 0;
     int tiempoPreparacion = qrand() % ((_TIEMPO_MAX_PREPARACION+ 1) - _TIEMPO_MIN_PREPARACION) + _TIEMPO_MIN_PREPARACION;
 
-    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
+    //qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
 
     ui.pbCocinero02->setMaximum(tiempoPreparacion);
     ui.pbCocinero02->setValue(contCocinero2);
@@ -290,11 +294,10 @@ void MainWindow::on_btnCocinero2_clicked()
 void MainWindow::on_btnCocinero3_clicked()
 {
 
-    qDebug(" Cocinero 3");
     contCocinero3 = 0;
     int tiempoPreparacion = qrand() % ((_TIEMPO_MAX_PREPARACION+ 1) - _TIEMPO_MIN_PREPARACION) + _TIEMPO_MIN_PREPARACION;
 
-    qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
+    //qDebug("Tiempo: %s", qUtf8Printable(QString::number(tiempoPreparacion)));
 
     ui.pbCocinero03->setMaximum(tiempoPreparacion);
     ui.pbCocinero03->setValue(contCocinero3);
@@ -677,11 +680,14 @@ int MainWindow::getSiguientePedido(){
 int MainWindow::getSiguientePedido(int p){
     QString pedido = "";
     QString estatus = "";
+
     for (int fila = 0;fila< ui.tblPedidos->rowCount();fila++) {
         pedido = ui.tblPedidos->item(fila, 0)->text();
         estatus = ui.tblPedidos->item(fila, 1)->text();
 
-        //        qDebug("pedidoX %d\n",pedido);
+        if(pedido == "#"+QString::number(p)){
+            qDebug("p %d vs %s est %s\n",p,qUtf8Printable(pedido), qUtf8Printable(estatus) );
+        }
         if(estatus == "E" && QString::compare(pedido,"#"+QString::number(p) ) == 0){
             qDebug("pedido %d\n",p);
             QTableWidgetItem *pCellEstatus = ui.tblPedidos->item(fila, 1);
@@ -786,6 +792,12 @@ void MainWindow::updateInfiniteCount(int contador){
                     ui.lblPedidoRepartiendo2->setText("-");
                 }
             }
+        }
+
+        if(!openMP1->isEsperando() && !cocinero1->isEsperando() && !cocinero2->isEsperando() && !cocinero3->isEsperando()){
+            openMP1->enEspera(true);
+        }else if(openMP1->isEsperando() && cocinero1->isEsperando() && cocinero2->isEsperando() && cocinero3->isEsperando()){
+            openMP1->enEspera(false);
         }
 
     }

@@ -47,6 +47,7 @@ private slots:
         void agregaPedido(int);
         void preparandoPedido(int);
         void generaPedidos(int);
+        void preparaPizza(int,int);
 
 
     private:

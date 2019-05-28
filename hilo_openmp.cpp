@@ -15,20 +15,20 @@ HiloOpenMP::HiloOpenMP(int hilo, int pedidos, bool esperando)
     : m_running(true)
 {
     m_hilo      = hilo;
-    m_pedidos = pedidos;
+    m_pedidos   = pedidos;
     m_esperando = esperando;
 
 }
 
 void HiloOpenMP::pedidos(int pedidos)
 {
-    last =  m_pedidos;
+    //last =  m_pedidos;
     m_pedidos = m_pedidos + pedidos;
 }
 
 void HiloOpenMP::enEspera(bool esperando)
 {
-    PortableSleep::msleep(1000);
+    //PortableSleep::msleep(1000);
     m_esperando = esperando;
 }
 
@@ -49,31 +49,38 @@ void HiloOpenMP::doWork()
 
 
             int semaphore_count  = 0;
-
+            if(last != m_pedidos){
 #pragma omp parallel for
-            for(int thread=0; thread<_NUM_COCINEROS; thread++)
-            {
-
-                for(int p=thread+last; p < m_pedidos; p+=_NUM_COCINEROS)
+                for(int thread=0; thread<_NUM_COCINEROS; thread++)
                 {
-                    omp_set_lock(&lock);
 
-                    //qDebug("Soy el hilo %d en el pedido %d\n",thread,p);
-                    emit updateOpenMPTiempo(p+1, thread+1);
-                    semaphore_count++;
+                    for(int p=thread+last; p < m_pedidos; p+=_NUM_COCINEROS)
+                    {
+                        omp_set_lock(&lock);
 
-                    if(semaphore_count >= _NUM_COCINEROS){
-                        PortableSleep::msleep(1000 * (_TIEMPO_MAX_PREPARACION+1));
-                        semaphore_count= 0;
+                        //qDebug("Soy el hilo %d en el pedido %d\n",thread,p);
+#pragma omp critical
+                        emit updateOpenMPTiempo(p+1, thread+1);
+                        semaphore_count++;
+
+                        if(semaphore_count >= _NUM_COCINEROS){
+                            PortableSleep::msleep(1000 * (_TIEMPO_MAX_PREPARACION+1));
+
+                            while(m_esperando){
+                                PortableSleep::msleep(1000);
+                            }
+                            semaphore_count= 0;
+                        }
+
+                        omp_unset_lock(&lock);
                     }
-
-                    omp_unset_lock(&lock);
-                }
-            } // Implicit barrier at the end of the parallel for
+                } // Implicit barrier at the end of the parallel for
 #pragma omp barrier
-            // Why a barrier when there is only one thread?
+                // Why a barrier when there is only one thread?
 
 
+                last = m_pedidos;
+            }
 
             enEspera(true);
 
