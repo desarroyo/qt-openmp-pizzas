@@ -34,6 +34,13 @@ Mostrar en pantalla, la lista de pizzas terminadas, en preparación y en espera 
 - La interfaz gráfica debe ilustrar los procesos antes citados
 - Debe ser resiliente
 
+
+##### Para ver el demo, click en la imagen. =>
+<a style="float:right" href="https://vakito.com/mti/assets/pizza.mp4" target="_blank">
+  <img alt="PicSciP Demo Video" src="http://vakito.com/mti/assets/watson-python-tts-stt-assistant.JPG" width="728" height="456" />
+</a>
+
+
 Desde <https://classroom.google.com/c/Mjc0NjI2NTQ0OTRa/a/MzU3NDE2OTI1ODNa/details> 
 
 ### Todos
